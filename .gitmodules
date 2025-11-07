@@ -1,0 +1,3 @@
+[submodule "RGBD_Video_SOD"]
+	path = RGBD_Video_SOD
+	url = https://github.com/jhl-Det/RGBD_Video_SOD.git
