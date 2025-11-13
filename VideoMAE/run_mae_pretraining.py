@@ -115,6 +115,37 @@ def get_args():
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
+    # SOD relevant code
+    # In VideoMAE/run_mae_pretraining.py inside get_args()
+    parser.add_argument(
+        '--mask_type',
+        default='tube',
+        choices=['random', 'tube', 'savi'],
+        type=str,
+        help='masked strategy of video tokens/patches'
+    )
+
+    parser.add_argument(
+        '--salient_mask_ratio',
+        default=0.85,
+        type=float,
+        help='mask ratio for salient patches when using saliency-aware masking'
+    )
+
+    parser.add_argument(
+        '--nonsalient_mask_ratio',
+        default=0.95,
+        type=float,
+        help='mask ratio for non-salient patches when using saliency-aware masking'
+    )
+
+    parser.add_argument(
+        '--saliency_root',
+        default='RGBD_Video_SOD/vidsod_100/saliency_patches',
+        type=str,
+        help='root folder containing per-video saliency patch maps (.npy)'
+    )
+
     return parser.parse_args()
 
 

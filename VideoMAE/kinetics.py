@@ -469,7 +469,6 @@ class VideoMAE(torch.utils.data.Dataset):
                                    "Check your data directory (opt.data-dir)."))
 
     def __getitem__(self, index):
-
         directory, target = self.clips[index]
         if self.video_loader:
             if '.' in directory.split('/')[-1]:
@@ -480,17 +479,24 @@ class VideoMAE(torch.utils.data.Dataset):
                 # So we need to provide extension (i.e., .mp4) to complete the file name.
                 video_name = '{}.{}'.format(directory, self.video_ext)
 
+            # NEW: base name without extension: 'video_0001'
+            video_id = os.path.splitext(os.path.basename(video_name))[0]
+
             decord_vr = decord.VideoReader(video_name, num_threads=1)
             duration = len(decord_vr)
+            segment_indices, skip_offsets = self._sample_train_indices(duration)
+            images = self._video_TSN_decord_batch_loader(
+                directory, decord_vr, duration, segment_indices, skip_offsets
+            )
 
-        segment_indices, skip_offsets = self._sample_train_indices(duration)
+            # NEW: pass video_id instead of None
+            process_data, mask = self.transform((images, video_id))  # T*C,H,W
 
-        images = self._video_TSN_decord_batch_loader(directory, decord_vr, duration, segment_indices, skip_offsets)
+            process_data = process_data.view(
+                (self.new_length, 3) + process_data.size()[-2:]
+            ).transpose(0, 1)  # T*C,H,W -> T,C,H,W -> C,T,H,W
 
-        process_data, mask = self.transform((images, None)) # T*C,H,W
-        process_data = process_data.view((self.new_length, 3) + process_data.size()[-2:]).transpose(0,1)  # T*C,H,W -> T,C,H,W -> C,T,H,W
-        
-        return (process_data, mask)
+            return (process_data, mask)
 
     def __len__(self):
         return len(self.clips)
