@@ -20,25 +20,27 @@ This project was built for academic experimentation and course work, emphasizing
 
 ## 📦 Repository Structure
 
+```
 SaViMAE/
 │
-├── VideoMAE/ # VideoMAE model, datasets, transforms, utils
-├── SaVi/ # Saliency + patch computation, masking generator
-│ ├── generate_simple_saliency_subset.py
-│ ├── precompute_saliency_patches.py
-│ └── saliency_masking_generator.py
+├── VideoMAE/                      # VideoMAE model, datasets, transforms, utils
+├── SaVi/                          # Saliency + patch computation, masking generator
+│   ├── generate_simple_saliency_subset.py
+│   ├── precompute_saliency_patches.py
+│   └── saliency_masking_generator.py
 │
-├── scripts/ # Reconstruction / evaluation utilities
-│ └── dump_savi_reconstructions.py
+├── scripts/                       # Reconstruction / evaluation utilities
+│   └── dump_savi_reconstructions.py
 │
-├── checkpoints/ # (ignored by Git) training checkpoints, logs
-├── datasets/ # (ignored by Git) local symlinks → scratch data
-├── slurm_logs/ # (ignored by Git) HPC logs
+├── checkpoints/                   # (ignored by Git) training checkpoints, logs
+├── datasets/                      # (ignored by Git) local symlinks → scratch data
+├── slurm_logs/                    # (ignored by Git) HPC logs
 │
 ├── pretrain_list_ucf101_full.txt
 ├── run_mae_pretraining.py
 ├── README.md
 └── .gitignore
+```
 
 
 ---
