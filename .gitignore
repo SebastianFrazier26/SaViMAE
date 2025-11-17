@@ -1,1 +1,87 @@
-miniconda.sh
+##############################
+# PYTHON / ENV / EDITOR
+##############################
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.idea/
+*.vscode/
+*.swp
+*.swo
+
+# Virtual environments
+venv/
+.env/
+.env*/
+*.conda
+*.ipynb_checkpoints/
+
+##############################
+# BUILD / CACHE / LOGS
+##############################
+*.log
+logs/
+slurm_logs/
+*.out
+*.err
+*.tar.gz
+.cache/
+dist/
+build/
+*.egg-info/
+
+##############################
+# TORCH, TIMM, TENSORBOARD
+##############################
+runs/
+tensorboard/
+tb_logs/
+
+##############################
+# CHECKPOINTS / MODEL WEIGHTS
+##############################
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+
+##############################
+# DATASETS (DO NOT TRACK)
+##############################
+datasets/
+data/
+raw_data/
+scratch/
+tmp_data/
+tmp/
+video_data/
+frames/
+UCF-101/
+UCF101/
+UCF-101-frames/
+UCF101-saliency-full/
+UCF101-saliency-patches-full/
+UCF101-*   # catch-all
+
+##############################
+# RESULTS / RECONSTRUCTIONS
+##############################
+reconstructions/
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.gif
+*.avi
+
+##############################
+# HPC / CLUSTER / MISC
+##############################
+*.sbatch
+*.sh
+*.submit
+*.slurm
+.DS_Store
+*.bak
+
