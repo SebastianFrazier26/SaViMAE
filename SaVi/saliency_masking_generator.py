@@ -2,7 +2,7 @@
 
 import numpy as np
 
-class SaliencyAwareTubeMaskingGenerator:
+class SaliencyMaskingGenerator:
     """
     Saliency-aware version of TubeMaskingGenerator.
 
@@ -47,7 +47,7 @@ class SaliencyAwareTubeMaskingGenerator:
 
     def __repr__(self):
         return (
-            f"SaliencyAwareTubeMaskingGenerator("
+            f"SaliencyMaskingGenerator("
             f"total_patches={self.total_patches}, "
             f"salient_ratio={self.salient_ratio}, "
             f"nonsalient_ratio={self.nonsalient_ratio})"

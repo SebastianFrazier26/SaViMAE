@@ -1,16 +1,15 @@
 import os
 import numpy as np
-from numpy.lib.function_base import disp
 import torch
 import decord
 from PIL import Image
 from torchvision import transforms
-from random_erasing import RandomErasing
+from .random_erasing import RandomErasing
 import warnings
 from decord import VideoReader, cpu
 from torch.utils.data import Dataset
-import video_transforms as video_transforms 
-import volume_transforms as volume_transforms
+from . import video_transforms as video_transforms
+from . import volume_transforms as volume_transforms
 
 class VideoClsDataset(Dataset):
     """Load your own video classification dataset."""
@@ -217,7 +216,6 @@ class VideoClsDataset(Dataset):
             buffer = buffer.permute(1, 0, 2, 3)
 
         return buffer
-
 
     def loadvideo_decord(self, sample, sample_rate_scale=1):
         """Load video content using Decord"""
@@ -482,12 +480,24 @@ class VideoMAE(torch.utils.data.Dataset):
             # NEW: base name without extension: 'video_0001'
             video_id = os.path.splitext(os.path.basename(video_name))[0]
 
-            decord_vr = decord.VideoReader(video_name, num_threads=1)
-            duration = len(decord_vr)
-            segment_indices, skip_offsets = self._sample_train_indices(duration)
-            images = self._video_TSN_decord_batch_loader(
-                directory, decord_vr, duration, segment_indices, skip_offsets
-            )
+            # Try normal decord video loading first
+            frames_dir = video_name[:-4] if video_name.endswith(".mp4") else video_name
+
+            images = None
+            if os.path.exists(video_name):
+                try:
+                    decord_vr = decord.VideoReader(video_name, num_threads=1)
+                    duration = len(decord_vr)
+                    segment_indices, skip_offsets = self._sample_train_indices(duration)
+                    images = self._video_TSN_decord_batch_loader(
+                        directory, decord_vr, duration, segment_indices, skip_offsets
+                    )
+                except Exception:
+                    # Fall back to extracted frames directory
+                    images = self._load_images_from_frames_dir(frames_dir)
+            else:
+                # No .mp4 file: directly use extracted frames
+                images = self._load_images_from_frames_dir(frames_dir)
 
             # NEW: pass video_id instead of None
             process_data, mask = self.transform((images, video_id))  # T*C,H,W
@@ -500,6 +510,42 @@ class VideoMAE(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.clips)
+
+    def _load_images_from_frames_dir(self, frames_dir):
+        """
+        Fallback when there is no .mp4 file: load RGB frames from a directory.
+
+        We will load self.num_segments * self.new_length frames, roughly evenly spaced,
+        returning a list of PIL Images, same type as _video_TSN_decord_batch_loader().
+        """
+        if not os.path.isdir(frames_dir):
+            raise RuntimeError(f"Frames directory not found: {frames_dir}")
+
+        frame_files = sorted(
+            f for f in os.listdir(frames_dir)
+            if f.lower().endswith((".jpg", ".jpeg", ".png"))
+        )
+
+        total = len(frame_files)
+        if total == 0:
+            raise RuntimeError(f"No frames in directory: {frames_dir}")
+
+        num_needed = self.num_segments * self.new_length
+
+        if total >= num_needed:
+            indices = np.linspace(0, total - 1, num_needed).astype(int)
+        else:
+            reps = int(np.ceil(num_needed / total))
+            full = np.tile(np.arange(total), reps)[:num_needed]
+            indices = full
+
+        images = []
+        for idx in indices:
+            fp = os.path.join(frames_dir, frame_files[idx])
+            img = Image.open(fp).convert("RGB")
+            images.append(img)
+
+        return images
 
     def _make_dataset(self, directory, setting):
         if not os.path.exists(setting):
@@ -539,7 +585,6 @@ class VideoMAE(torch.utils.data.Dataset):
             skip_offsets = np.zeros(
                 self.skip_length // self.new_step, dtype=int)
         return offsets + 1, skip_offsets
-
 
     def _video_TSN_decord_batch_loader(self, directory, video_reader, duration, indices, skip_offsets):
         sampled_list = []

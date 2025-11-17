@@ -1,103 +1,185 @@
-# SaVi/precompute_saliency_patches.py
-
 import os
-import glob
+import argparse
+from typing import List
+
 import numpy as np
 from PIL import Image
 
-import argparse
-
-def binarize_saliency_map(img: Image.Image, threshold: float = 0.5):
-    """Convert saliency PNG into binary mask [H, W] with values in {0, 1}."""
-    arr = np.array(img).astype("float32")
-    # If saliency is single-channel [H, W], normalize to [0,1]
-    if arr.ndim == 2:
-        arr_norm = arr / (arr.max() + 1e-8)
-    else:
-        # If RGB, just use one channel / average
-        arr_norm = arr.mean(axis=-1) / (arr.max() + 1e-8)
-    return (arr_norm >= threshold).astype("float32")
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = lambda x, **kwargs: x  # fallback if tqdm is not available
 
 
-def compute_patch_saliency(mask_hw, input_size=224, patch_size=16):
+def load_saliency_frame(path: str, input_size: int) -> np.ndarray:
     """
-    mask_hw: [H, W] at image resolution (e.g. 224x224).
-    Returns patch-level mask [H_p, W_p] where each patch is salient if mean > 0.5.
+    Load a single saliency frame (PNG), resize to (input_size, input_size),
+    convert to grayscale, and return as float32 array in [0, 1].
     """
-    H, W = mask_hw.shape
-    assert H == input_size and W == input_size, "Resize saliency to input_size first"
-
-    H_p = input_size // patch_size
-    W_p = input_size // patch_size
-
-    patch_mask = np.zeros((H_p, W_p), dtype=np.float32)
-    for i in range(H_p):
-        for j in range(W_p):
-            h0 = i * patch_size
-            h1 = (i + 1) * patch_size
-            w0 = j * patch_size
-            w1 = (j + 1) * patch_size
-            patch = mask_hw[h0:h1, w0:w1]
-            patch_mask[i, j] = 1.0 if patch.mean() >= 0.5 else 0.0
-
-    return patch_mask
+    img = Image.open(path).convert("L")
+    img = img.resize((input_size, input_size), Image.BILINEAR)
+    arr = np.array(img).astype(np.float32) / 255.0
+    return arr
 
 
-def process_video(video_id, sal_root, out_root, num_frames=None,
-                  input_size=224, patch_size=16, threshold=0.5):
+def frame_to_patch_mask(frame: np.ndarray, patch_size: int, threshold: float) -> np.ndarray:
     """
-    video_id: e.g. 'video_0001'
-    sal_root: e.g. 'RGBD_Video_SOD/vidsod_100/saliency'
-    out_root: directory to save patch-level npy
-    """
-    video_dir = os.path.join(sal_root, video_id)
-    frame_paths = sorted(glob.glob(os.path.join(video_dir, "*.png")))
-    if num_frames is not None:
-        frame_paths = frame_paths[:num_frames]
+    Convert a single saliency frame (H, W) in [0, 1] to a patch-level saliency mask.
 
-    patch_masks = []
-    for fp in frame_paths:
-        img = Image.open(fp).convert("L")  # 1-channel
-        img = img.resize((input_size, input_size), Image.BILINEAR)
-        bin_mask = binarize_saliency_map(img, threshold=threshold)
-        patch_mask = compute_patch_saliency(bin_mask, input_size=input_size,
-                                            patch_size=patch_size)
+    - threshold to binary (salient vs non-salient)
+    - reshape into (H_p, patch_size, W_p, patch_size)
+    - use max within each patch to decide if the patch is salient
+
+    Returns:
+        patch_mask: (H_p, W_p) float32 array in {0.0, 1.0}
+    """
+    H, W = frame.shape
+    assert H % patch_size == 0 and W % patch_size == 0, \
+        f"Frame size ({H}, {W}) must be divisible by patch_size={patch_size}"
+
+    binary = (frame >= threshold).astype(np.float32)
+
+    Hp = H // patch_size
+    Wp = W // patch_size
+
+    # reshape to [Hp, patch_size, Wp, patch_size]
+    reshaped = binary.reshape(Hp, patch_size, Wp, patch_size)
+
+    # max pool within each patch
+    patch_mask = reshaped.max(axis=(1, 3))
+    return patch_mask  # (Hp, Wp)
+
+
+def process_video(sal_vid_dir: str,
+                  out_path: str,
+                  input_size: int,
+                  patch_size: int,
+                  threshold: float) -> None:
+    """
+    Process all saliency frames in a single video directory:
+
+    - load all saliency PNGs in sorted order
+    - convert each to a patch-level saliency mask
+    - stack to shape [T, H_p, W_p]
+    - save as .npy at out_path
+
+    If there are no valid frames, skip gracefully.
+    """
+    frames = sorted(
+        f for f in os.listdir(sal_vid_dir)
+        if f.lower().endswith((".png", ".jpg", ".jpeg"))
+    )
+
+    if not frames:
+        print(f"[WARN] No saliency frames found in {sal_vid_dir}, skipping.")
+        return
+
+    patch_masks: List[np.ndarray] = []
+
+    for fname in frames:
+        fpath = os.path.join(sal_vid_dir, fname)
+        try:
+            frame = load_saliency_frame(fpath, input_size)
+        except Exception as e:
+            print(f"[WARN] Failed to load frame {fpath}: {e}")
+            continue
+
+        try:
+            patch_mask = frame_to_patch_mask(frame, patch_size, threshold)
+        except AssertionError as e:
+            print(f"[WARN] Skipping frame {fpath} due to size mismatch: {e}")
+            continue
+
         patch_masks.append(patch_mask)
 
-    patch_masks = np.stack(patch_masks, axis=0)  # [T, H_p, W_p]
+    if len(patch_masks) == 0:
+        print(f"[WARN] No valid patch masks for video {sal_vid_dir}, skipping.")
+        return
 
-    os.makedirs(out_root, exist_ok=True)
-    out_path = os.path.join(out_root, f"{video_id}.npy")
-    np.save(out_path, patch_masks)
-    print("Saved:", out_path)
+    patch_masks = np.stack(patch_masks, axis=0)  # [T, H_p, W_p]
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    np.save(out_path, patch_masks.astype(np.float32))
+    # print(f"[INFO] Saved patch masks to {out_path}")
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sal_root", type=str, required=True,
-                        help="Root folder of frame-level saliency maps (per video subdir)")
-    parser.add_argument("--out_root", type=str, required=True,
-                        help="Output folder for patch-level saliency .npy")
-    parser.add_argument("--input_size", type=int, default=224)
-    parser.add_argument("--patch_size", type=int, default=16)
-    parser.add_argument("--threshold", type=float, default=0.5)
-    parser.add_argument("--num_frames", type=int, default=None,
-                        help="Optional: limit frames per video")
+    parser.add_argument(
+        "--sal_root",
+        type=str,
+        required=True,
+        help="Root directory of saliency maps, e.g. datasets/UCF101-saliency-subset"
+    )
+    parser.add_argument(
+        "--out_root",
+        type=str,
+        required=True,
+        help="Output directory for patch saliency npy files"
+    )
+    parser.add_argument(
+        "--input_size",
+        type=int,
+        default=224,
+        help="Input frame size (H, W) used for saliency + patches"
+    )
+    parser.add_argument(
+        "--patch_size",
+        type=int,
+        default=16,
+        help="Patch size (pixels) for MAE patches"
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Threshold in [0,1] to decide saliency vs non-saliency per pixel"
+    )
+
     args = parser.parse_args()
 
-    video_ids = sorted(os.listdir(args.sal_root))
-    for vid in video_ids:
-        if not os.path.isdir(os.path.join(args.sal_root, vid)):
-            continue
-        process_video(
-            video_id=vid,
-            sal_root=args.sal_root,
-            out_root=args.out_root,
-            num_frames=args.num_frames,
-            input_size=args.input_size,
-            patch_size=args.patch_size,
-            threshold=args.threshold,
+    sal_root = args.sal_root
+    out_root = args.out_root
+
+    if not os.path.isdir(sal_root):
+        raise RuntimeError(f"Saliency root directory not found: {sal_root}")
+
+    os.makedirs(out_root, exist_ok=True)
+
+    classes = sorted(
+        d for d in os.listdir(sal_root)
+        if os.path.isdir(os.path.join(sal_root, d))
+    )
+
+    print(f"[INFO] Found {len(classes)} classes in saliency root: {sal_root}")
+    print(f"[INFO] Saving patch saliency to: {out_root}")
+    print(f"[INFO] input_size={args.input_size}, patch_size={args.patch_size}, threshold={args.threshold}")
+
+    for cls in tqdm(classes, desc="Classes"):
+        cls_sal_dir = os.path.join(sal_root, cls)
+        videos = sorted(
+            d for d in os.listdir(cls_sal_dir)
+            if os.path.isdir(os.path.join(cls_sal_dir, d))
         )
+
+        for vid in tqdm(videos, desc=f"{cls}", leave=False):
+            sal_vid_dir = os.path.join(cls_sal_dir, vid)
+            out_path = os.path.join(out_root, cls, vid + ".npy")
+
+            # Skip if already computed
+            if os.path.exists(out_path):
+                continue
+
+            process_video(
+                sal_vid_dir=sal_vid_dir,
+                out_path=out_path,
+                input_size=args.input_size,
+                patch_size=args.patch_size,
+                threshold=args.threshold,
+            )
+
+    print("[INFO] Done precomputing saliency patches.")
+
 
 if __name__ == "__main__":
     main()
+

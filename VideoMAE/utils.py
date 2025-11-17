@@ -12,7 +12,7 @@ from pathlib import Path
 import subprocess
 import torch
 import torch.distributed as dist
-from torch._six import inf
+from math import inf
 import random
 
 from tensorboardX import SummaryWriter
@@ -382,24 +382,57 @@ def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
     return total_norm
 
 
-def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epochs=0,
-                     start_warmup_value=0, warmup_steps=-1):
-    warmup_schedule = np.array([])
-    warmup_iters = warmup_epochs * niter_per_ep
-    if warmup_steps > 0:
+def cosine_scheduler(base_value, final_value, epochs, niter_per_ep,
+                     warmup_epochs=0, start_warmup_value=0, warmup_steps=-1):
+    """
+    Cosine LR scheduler with optional warmup.
+
+    Returns a 1D numpy array of length epochs * niter_per_ep.
+    If warmup_steps or warmup_epochs don't line up perfectly with this short run,
+    we simply truncate or pad the schedule to the desired length.
+    """
+    total_iters = epochs * niter_per_ep
+
+    # Decide how many warmup iterations we want
+    if warmup_steps is not None and warmup_steps > 0:
         warmup_iters = warmup_steps
-    print("Set warmup steps = %d" % warmup_iters)
-    if warmup_epochs > 0:
-        warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
+        warmup_epochs = 0
+    else:
+        warmup_iters = warmup_epochs * niter_per_ep
 
-    iters = np.arange(epochs * niter_per_ep - warmup_iters)
-    schedule = np.array(
-        [final_value + 0.5 * (base_value - final_value) * (1 + math.cos(math.pi * i / (len(iters)))) for i in iters])
+    warmup_iters = int(min(max(warmup_iters, 0), total_iters))
 
-    schedule = np.concatenate((warmup_schedule, schedule))
+    # Warmup schedule: linear from start_warmup_value to base_value
+    if warmup_iters > 0:
+        warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters, dtype=np.float32)
+    else:
+        warmup_schedule = np.array([], dtype=np.float32)
 
-    assert len(schedule) == epochs * niter_per_ep
+    # Remaining iters after warmup
+    remaining = max(total_iters - warmup_iters, 0)
+
+    # Cosine decay from base_value to final_value over the remaining steps
+    if remaining > 0:
+        iters = np.arange(remaining, dtype=np.float32)
+        cosine_schedule = final_value + 0.5 * (base_value - final_value) * (
+            1.0 + np.cos(np.pi * iters / float(max(remaining, 1)))
+        )
+        cosine_schedule = cosine_schedule.astype(np.float32)
+    else:
+        cosine_schedule = np.array([], dtype=np.float32)
+
+    schedule = np.concatenate((warmup_schedule, cosine_schedule))
+
+    # Make absolutely sure length == total_iters
+    if len(schedule) > total_iters:
+        schedule = schedule[:total_iters]
+    elif len(schedule) < total_iters:
+        last = schedule[-1] if len(schedule) > 0 else final_value
+        pad = np.full((total_iters - len(schedule),), last, dtype=np.float32)
+        schedule = np.concatenate((schedule, pad))
+
     return schedule
+
 
 
 def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, model_ema=None):

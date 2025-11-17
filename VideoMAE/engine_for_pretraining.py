@@ -1,24 +1,44 @@
 import math
 import sys
 from typing import Iterable
+
 import torch
 import torch.nn as nn
-import utils
+from contextlib import nullcontext
+
+from . import utils
 from einops import rearrange
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
-def train_one_epoch(model: torch.nn.Module, data_loader: Iterable, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, loss_scaler, max_norm: float = 0, patch_size: int = 16, 
-                    normlize_target: bool = True, log_writer=None, lr_scheduler=None, start_steps=None,
-                    lr_schedule_values=None, wd_schedule_values=None):
+
+def train_one_epoch(
+    model: torch.nn.Module,
+    data_loader: Iterable,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    epoch: int,
+    loss_scaler,
+    max_norm: float = 0,
+    patch_size: int = 16,
+    normlize_target: bool = True,
+    log_writer=None,
+    lr_scheduler=None,
+    start_steps=None,
+    lr_schedule_values=None,
+    wd_schedule_values=None,
+):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    metric_logger.add_meter('min_lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = 'Epoch: [{}]'.format(epoch)
+    metric_logger.add_meter("lr", utils.SmoothedValue(window_size=1, fmt="{value:.6f}"))
+    metric_logger.add_meter("min_lr", utils.SmoothedValue(window_size=1, fmt="{value:.6f}"))
+    header = "Epoch: [{}]".format(epoch)
     print_freq = 10
 
     loss_func = nn.MSELoss()
+
+    # Decide whether we can use CUDA AMP
+    use_cuda = torch.cuda.is_available()
+    autocast_ctx = torch.cuda.amp.autocast if use_cuda else nullcontext
 
     for step, batch in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         # assign learning rate & weight decay for each step
@@ -26,7 +46,9 @@ def train_one_epoch(model: torch.nn.Module, data_loader: Iterable, optimizer: to
         if lr_schedule_values is not None or wd_schedule_values is not None:
             for i, param_group in enumerate(optimizer.param_groups):
                 if lr_schedule_values is not None:
-                    param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
+                    # Some param groups don't define "lr_scale": default to 1.0
+                    scale = param_group.get("lr_scale", 1.0)
+                    param_group["lr"] = lr_schedule_values[it] * scale
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
 
@@ -41,18 +63,32 @@ def train_one_epoch(model: torch.nn.Module, data_loader: Iterable, optimizer: to
             unnorm_videos = videos * std + mean  # in [0, 1]
 
             if normlize_target:
-                videos_squeeze = rearrange(unnorm_videos, 'b c (t p0) (h p1) (w p2) -> b (t h w) (p0 p1 p2) c', p0=2, p1=patch_size, p2=patch_size)
-                videos_norm = (videos_squeeze - videos_squeeze.mean(dim=-2, keepdim=True)
-                    ) / (videos_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt() + 1e-6)
+                videos_squeeze = rearrange(
+                    unnorm_videos,
+                    "b c (t p0) (h p1) (w p2) -> b (t h w) (p0 p1 p2) c",
+                    p0=2,
+                    p1=patch_size,
+                    p2=patch_size,
+                )
+                videos_norm = (videos_squeeze - videos_squeeze.mean(dim=-2, keepdim=True)) / (
+                    videos_squeeze.var(dim=-2, unbiased=True, keepdim=True).sqrt() + 1e-6
+                )
                 # we find that the mean is about 0.48 and standard deviation is about 0.08.
-                videos_patch = rearrange(videos_norm, 'b n p c -> b n (p c)')
+                videos_patch = rearrange(videos_norm, "b n p c -> b n (p c)")
             else:
-                videos_patch = rearrange(unnorm_videos, 'b c (t p0) (h p1) (w p2) -> b (t h w) (p0 p1 p2 c)', p0=2, p1=patch_size, p2=patch_size)
+                videos_patch = rearrange(
+                    unnorm_videos,
+                    "b c (t p0) (h p1) (w p2) -> b (t h w) (p0 p1 p2 c)",
+                    p0=2,
+                    p1=patch_size,
+                    p2=patch_size,
+                )
 
             B, _, C = videos_patch.shape
             labels = videos_patch[bool_masked_pos].reshape(B, -1, C)
 
-        with torch.cuda.amp.autocast():
+        # Use AMP on GPU, no-op context on CPU
+        with autocast_ctx():
             outputs = model(videos, bool_masked_pos)
             loss = loss_func(input=outputs, target=labels)
 
@@ -64,41 +100,69 @@ def train_one_epoch(model: torch.nn.Module, data_loader: Iterable, optimizer: to
 
         optimizer.zero_grad()
         # this attribute is added by timm on one optimizer (adahessian)
-        is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-        grad_norm = loss_scaler(loss, optimizer, clip_grad=max_norm,
-                                parameters=model.parameters(), create_graph=is_second_order)
-        loss_scale_value = loss_scaler.state_dict()["scale"]
+        is_second_order = hasattr(optimizer, "is_second_order") and optimizer.is_second_order
+        grad_norm = loss_scaler(
+            loss,
+            optimizer,
+            clip_grad=max_norm,
+            parameters=model.parameters(),
+            create_graph=is_second_order,
+        )
 
-        torch.cuda.synchronize()
+        # Some NativeScaler variants don't expose "scale" in state_dict on CPU / non-AMP.
+        ls_state = loss_scaler.state_dict()
+        loss_scale_value = ls_state.get("scale", 1.0)
+
+        # Only sync if CUDA is actually available
+        if use_cuda:
+            torch.cuda.synchronize()
 
         metric_logger.update(loss=loss_value)
         metric_logger.update(loss_scale=loss_scale_value)
-        min_lr = 10.
-        max_lr = 0.
-        for group in optimizer.param_groups:
-            min_lr = min(min_lr, group["lr"])
-            max_lr = max(max_lr, group["lr"])
 
-        metric_logger.update(lr=max_lr)
-        metric_logger.update(min_lr=min_lr)
+        # Collect LR stats; ensure they are plain floats
+        min_lr = 10.0
+        max_lr = 0.0
+        for group in optimizer.param_groups:
+            lr_val = group["lr"]
+            if isinstance(lr_val, torch.Tensor):
+                lr_val = lr_val.item()
+            min_lr = min(min_lr, lr_val)
+            max_lr = max(max_lr, lr_val)
+
+        metric_logger.update(lr=float(max_lr))
+        metric_logger.update(min_lr=float(min_lr))
+
+        # Collect weight decay; ensure it's a float if present
         weight_decay_value = None
         for group in optimizer.param_groups:
             if group["weight_decay"] > 0:
-                weight_decay_value = group["weight_decay"]
-        metric_logger.update(weight_decay=weight_decay_value)
-        metric_logger.update(grad_norm=grad_norm)
+                wd_val = group["weight_decay"]
+                if isinstance(wd_val, torch.Tensor):
+                    wd_val = wd_val.item()
+                weight_decay_value = wd_val
+
+        if weight_decay_value is not None:
+            metric_logger.update(weight_decay=float(weight_decay_value))
+
+        # Ensure grad_norm is a float
+        if isinstance(grad_norm, torch.Tensor):
+            grad_norm = grad_norm.item()
+        metric_logger.update(grad_norm=float(grad_norm))
 
         if log_writer is not None:
             log_writer.update(loss=loss_value, head="loss")
             log_writer.update(loss_scale=loss_scale_value, head="opt")
-            log_writer.update(lr=max_lr, head="opt")
-            log_writer.update(min_lr=min_lr, head="opt")
-            log_writer.update(weight_decay=weight_decay_value, head="opt")
-            log_writer.update(grad_norm=grad_norm, head="opt")
+            log_writer.update(lr=float(max_lr), head="opt")
+            log_writer.update(min_lr=float(min_lr), head="opt")
+            if weight_decay_value is not None:
+                log_writer.update(weight_decay=float(weight_decay_value), head="opt")
+            log_writer.update(grad_norm=float(grad_norm), head="opt")
             log_writer.set_step()
 
         if lr_scheduler is not None:
             lr_scheduler.step_update(start_steps + step)
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)

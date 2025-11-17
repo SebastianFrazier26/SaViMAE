@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from functools import partial
 
-from modeling_finetune import Block, _cfg, PatchEmbed, get_sinusoid_encoding_table
+from .modeling_finetune import Block, _cfg, PatchEmbed, get_sinusoid_encoding_table
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_ as __call_trunc_normal_
 
@@ -203,6 +203,7 @@ class PretrainVisionTransformer(nn.Module):
                  tubelet_size=2,
                  num_classes=0, # avoid the error from create_fn in timm
                  in_chans=0, # avoid the error from create_fn in timm
+                 **kwargs,
                  ):
         super().__init__()
         self.encoder = PretrainVisionTransformerEncoder(

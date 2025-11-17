@@ -1,3 +1,8 @@
+import os
+import sys
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 import argparse
 import datetime
 import numpy as np
@@ -5,16 +10,14 @@ import time
 import torch
 import torch.backends.cudnn as cudnn
 import json
-import os
 from pathlib import Path
 from timm.models import create_model
-from optim_factory import create_optimizer
-from datasets import build_pretraining_dataset
-from engine_for_pretraining import train_one_epoch
-from utils import NativeScalerWithGradNormCount as NativeScaler
-import utils
-import modeling_pretrain
-
+from .optim_factory import create_optimizer
+from .datasets import build_pretraining_dataset
+from .engine_for_pretraining import train_one_epoch
+from .utils import NativeScalerWithGradNormCount as NativeScaler
+from . import utils
+from . import modeling_pretrain
 
 def get_args():
     parser = argparse.ArgumentParser('VideoMAE pre-training script', add_help=False)
@@ -28,9 +31,6 @@ def get_args():
 
     parser.add_argument('--decoder_depth', default=4, type=int,
                         help='depth of decoder')
-
-    parser.add_argument('--mask_type', default='tube', choices=['random', 'tube'],
-                        type=str, help='masked strategy of video tokens/patches')
 
     parser.add_argument('--mask_ratio', default=0.75, type=float,
                         help='ratio of the visual tokens/patches need be masked')
