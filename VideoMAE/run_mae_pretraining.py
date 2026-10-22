@@ -115,35 +115,46 @@ def get_args():
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
-    # SOD relevant code
-    # In VideoMAE/run_mae_pretraining.py inside get_args()
+    # SaViMAE: saliency-aware masking (modified 2026-10-22; see SaVi/saliency_masking_generator.py)
     parser.add_argument(
         '--mask_type',
-        default='tube',
-        choices=['random', 'tube', 'savi'],
+        default='savi',
+        choices=['savi'],
         type=str,
-        help='masked strategy of video tokens/patches'
+        help='masking strategy; only the saliency-aware one is implemented in this data path'
     )
-
     parser.add_argument(
         '--salient_mask_ratio',
         default=0.85,
         type=float,
-        help='mask ratio for salient patches when using saliency-aware masking'
+        help='fraction of salient tokens that are masked'
     )
-
     parser.add_argument(
-        '--nonsalient_mask_ratio',
+        '--background_mask_ratio', '--nonsalient_mask_ratio',
+        dest='background_mask_ratio',
         default=0.95,
         type=float,
-        help='mask ratio for non-salient patches when using saliency-aware masking'
+        help='fraction of non-salient tokens that are masked (--nonsalient_mask_ratio is the old name)'
     )
-
+    parser.add_argument(
+        '--savi_total_mask_ratio',
+        default=None,
+        type=float,
+        help='overall fraction of tokens masked per clip (fixed, as VideoMAE needs equal counts per batch); '
+             'default: --background_mask_ratio'
+    )
     parser.add_argument(
         '--saliency_root',
-        default='RGBD_Video_SOD/vidsod_100/saliency_patches',
+        default=None,
         type=str,
-        help='root folder containing per-video saliency patch maps (.npy)'
+        help='root folder with <class>/<video>.npy patch saliency, [T, H_p, W_p] (required)'
+    )
+    parser.add_argument(
+        '--saliency_fallback',
+        default='error',
+        choices=['error', 'random'],
+        help="missing/corrupt saliency file: 'error' aborts; 'random' masks that clip uniformly at random, "
+             "logs a warning and counts it (reported each epoch)"
     )
 
     return parser.parse_args()
@@ -179,7 +190,8 @@ def main(args):
     model = get_model(args)
     patch_size = model.encoder.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
-    args.window_size = (args.num_frames // 2, args.input_size // patch_size[0], args.input_size // patch_size[1])
+    args.tubelet_size = model.encoder.patch_embed.tubelet_size
+    args.window_size = (args.num_frames // args.tubelet_size, args.input_size // patch_size[0], args.input_size // patch_size[1])
     args.patch_size = patch_size
 
     # get dataset
@@ -256,6 +268,7 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
+        dataset_train.set_epoch(epoch)
         if log_writer is not None:
             log_writer.set_step(epoch * num_training_steps_per_epoch)
         train_stats = train_one_epoch(
@@ -268,6 +281,11 @@ def main(args):
             patch_size=patch_size[0],
             normlize_target=args.normlize_target,
         )
+        # Main-process view of the shared counter; workers increment it.
+        n_fallback = dataset_train.pop_fallback_count()
+        if args.saliency_fallback == 'random' or n_fallback:
+            print(f"[saliency] epoch {epoch}: {n_fallback} clips fell back to random masking")
+        train_stats['saliency_fallback_clips'] = n_fallback
         if args.output_dir:
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
                 utils.save_model(
