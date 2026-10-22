@@ -1,0 +1,96 @@
+:root {
+  --bg: #fbfbf9;
+  --surface: #ffffff;
+  --text: #1b1f24;
+  --muted: #59616d;
+  --line: #e2e4e8;
+  --accent: #d9480f;
+  --accent-soft: #fff1e8;
+  --masked: #6b7280;
+  --note-bg: #fff8db;
+  --note-line: #e9c46a;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1216;
+    --surface: #161a20;
+    --text: #e6e8eb;
+    --muted: #a3acb9;
+    --line: #2a3038;
+    --accent: #ff8a4c;
+    --accent-soft: #2a1a12;
+    --masked: #3a414c;
+    --note-bg: #2a2412;
+    --note-line: #8a6d1f;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f1216;
+  --surface: #161a20;
+  --text: #e6e8eb;
+  --muted: #a3acb9;
+  --line: #2a3038;
+  --accent: #ff8a4c;
+  --accent-soft: #2a1a12;
+  --masked: #3a414c;
+  --note-bg: #2a2412;
+  --note-line: #8a6d1f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 clamp(14px, 1.4vw + 10px, 17px)/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: clamp(16px, 4vw, 40px) 16px 48px;
+}
+
+h1 { font-size: clamp(1.6rem, 4vw + 0.6rem, 2.4rem); line-height: 1.15; margin: 0.2em 0 0.3em; }
+h2 { font-size: clamp(1.1rem, 1.2vw + 0.8rem, 1.4rem); margin: 2.2em 0 0.5em; padding-top: 0.6em; border-top: 1px solid var(--line); }
+h3 { font-size: 1rem; margin: 1.4em 0 0.3em; }
+p, li { max-width: 68ch; }
+a { color: var(--accent); }
+code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--accent-soft); padding: 0.05em 0.3em; border-radius: 4px; overflow-wrap: anywhere; }
+
+.eyebrow { color: var(--muted); font-size: 0.85em; letter-spacing: 0.06em; text-transform: uppercase; margin: 0; }
+.lede { font-size: 1.08em; color: var(--text); }
+.links { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; list-style: none; }
+.links a { display: inline-block; padding: 0.35em 0.8em; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; background: var(--surface); }
+
+.ratios { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 1em 0; }
+.ratio { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0.7em 0.9em; }
+.ratio b { display: block; font-size: 1.6em; font-variant-numeric: tabular-nums; }
+.ratio span { color: var(--muted); font-size: 0.9em; }
+
+figure { margin: 1.2em 0; }
+figure svg { max-width: 560px; }
+figure svg, figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+figcaption { color: var(--muted); font-size: 0.88em; margin-top: 0.5em; }
+
+.note { background: var(--note-bg); border-left: 4px solid var(--note-line); padding: 0.7em 1em; border-radius: 6px; margin: 1em 0; }
+.note p { margin: 0.3em 0; }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.92em; }
+th, td { text-align: left; padding: 0.45em 0.6em; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+.table-wrap { overflow-x: auto; }
+
+footer { color: var(--muted); font-size: 0.85em; margin-top: 3em; border-top: 1px solid var(--line); padding-top: 1em; }
+
+/* Method diagram: colours come from the page tokens so it follows light/dark. */
+.dg-box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.dg-hot { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+.dg-t { fill: var(--text); font: 600 17px system-ui, sans-serif; }
+.dg-s { fill: var(--muted); font: 15px system-ui, sans-serif; }
+.dg-arrow { stroke: var(--muted); stroke-width: 1.6; fill: none; }
+.dg-head { fill: var(--muted); }

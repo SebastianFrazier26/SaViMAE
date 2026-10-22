@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SaViMAE</title>
+  <meta name="description" content="SaViMAE: saliency-guided masking for VideoMAE self-supervised video pretraining on UCF101.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Self-supervised video learning · course research project</p>
+    <h1>SaViMAE</h1>
+    <p class="lede">Saliency-aware masking for <a href="https://arxiv.org/abs/2203.12602">VideoMAE</a>. VideoMAE hides random
+      spacetime patches. SaViMAE first computes a cheap saliency map, then masks salient and background patches at
+      <em>different</em> rates, so the visual budget tracks where the action is.</p>
+    <ul class="links">
+      <li><a href="https://github.com/SebastianFrazier26/SaViMAE">Code on GitHub</a></li>
+      <li><a href="https://github.com/MCG-NJU/VideoMAE">Upstream VideoMAE</a></li>
+      <li><a href="#license">Licensing</a></li>
+    </ul>
+  </header>
+
+  <section id="idea">
+    <h2>The idea</h2>
+    <p>Masked video autoencoders work because video is redundant: hide 90%+ of the patches and the model can still
+      reconstruct them. Uniform random masking treats every patch the same, though. A static sky patch and a patch
+      of a moving hand count equally.</p>
+    <p>SaViMAE splits the 16×16 patch tokens into <strong>salient</strong> and <strong>non-salient</strong> groups,
+      based on a per-frame saliency map, and gives each group its own mask ratio:</p>
+    <div class="ratios">
+      <div class="ratio"><b>0.85</b><span>mask ratio, salient patches<br><code>--salient_mask_ratio</code></span></div>
+      <div class="ratio"><b>0.95</b><span>mask ratio, non-salient patches<br><code>--nonsalient_mask_ratio</code></span></div>
+    </div>
+    <p>Both values are the defaults in <code>VideoMAE/run_mae_pretraining.py</code> and the values used by the scripts
+      in <code>scripts/</code>. More of the salient region stays visible to the encoder. The background is masked
+      almost completely, since it is the easiest part to fill in.</p>
+  </section>
+
+  <section id="method">
+    <h2>Method</h2>
+    <figure>
+      <svg viewBox="0 0 440 486" role="img" aria-labelledby="dg-title dg-desc">
+        <title id="dg-title">SaViMAE pipeline</title>
+        <desc id="dg-desc">Frames go to a saliency map, then a patch-level saliency grid, then saliency-aware masking, then the VideoMAE encoder and decoder trained with a reconstruction loss.</desc>
+        <defs>
+          <marker id="dg-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path class="dg-head" d="M0,0 L10,5 L0,10 z"/>
+          </marker>
+        </defs>
+        <rect class="dg-box" x="20" y="10" width="400" height="62" rx="10"/>
+        <text class="dg-t" x="38" y="40">1 · UCF101 frames</text>
+        <text class="dg-s" x="38" y="64">16-frame clips · stride 4 · 224×224</text>
+        <rect class="dg-box" x="20" y="100" width="400" height="62" rx="10"/>
+        <text class="dg-t" x="38" y="130">2 · Saliency map, per frame</text>
+        <text class="dg-s" x="38" y="154">|I − mean(I)|, normalised to [0, 1]</text>
+        <rect class="dg-box" x="20" y="190" width="400" height="62" rx="10"/>
+        <text class="dg-t" x="38" y="220">3 · Patch saliency [T, 14, 14]</text>
+        <text class="dg-s" x="38" y="244">threshold 0.5, max-pool each 16×16 patch</text>
+        <rect class="dg-hot" x="20" y="280" width="400" height="84" rx="10"/>
+        <text class="dg-t" x="38" y="310">4 · SaVi masking (the new part)</text>
+        <text class="dg-s" x="38" y="334">tubelet tokens split salient / background</text>
+        <text class="dg-s" x="38" y="356">salient masked 0.85 · background 0.95</text>
+        <rect class="dg-box" x="20" y="392" width="400" height="84" rx="10"/>
+        <text class="dg-t" x="38" y="422">5 · VideoMAE ViT-B encoder → decoder</text>
+        <text class="dg-s" x="38" y="446">encoder sees visible tokens only</text>
+        <text class="dg-s" x="38" y="468">decoder rebuilds masked pixels (MSE)</text>
+        <path class="dg-arrow" d="M220 72 V98" marker-end="url(#dg-arr)"/>
+        <path class="dg-arrow" d="M220 162 V188" marker-end="url(#dg-arr)"/>
+        <path class="dg-arrow" d="M220 252 V278" marker-end="url(#dg-arr)"/>
+        <path class="dg-arrow" d="M220 364 V390" marker-end="url(#dg-arr)"/>
+      </svg>
+      <figcaption>Step 2 is <code>SaVi/generate_simple_saliency_subset.py</code>, step 3 is <code>SaVi/precompute_saliency_patches.py</code>. Both run offline over the dataset. Step 4 runs per sample in the data loader. Only step 4
+        changes how VideoMAE trains.</figcaption>
+    </figure>
+
+    <h3>How it differs from VideoMAE</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>VideoMAE (Tong et al., 2022)</th><th>SaViMAE</th></tr></thead>
+        <tbody>
+          <tr><td>Masking</td><td>Tube masking: one random 2D mask repeated over time, ratio 0.9–0.95</td><td>Saliency-conditioned: separate ratios for salient and background tokens</td></tr>
+          <tr><td>Extra input</td><td>None</td><td>Precomputed per-video patch saliency (<code>.npy</code>)</td></tr>
+          <tr><td>Saliency model</td><td>—</td><td>Hand-crafted contrast saliency. No pretrained network, no RGB-D model</td></tr>
+          <tr><td>Backbone, decoder, loss</td><td>ViT + lightweight decoder, MSE</td><td>Unchanged (upstream code)</td></tr>
+          <tr><td>Compute target</td><td>Multi-GPU clusters</td><td>CPU-only HPC nodes via Slurm</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Credit: the model, pretraining engine and most of <code>VideoMAE/</code> are from
+      <a href="https://github.com/MCG-NJU/VideoMAE">MCG-NJU/VideoMAE</a> by Zhan Tong, Yibing Song, Jue Wang and
+      Limin Wang, <a href="https://arxiv.org/abs/2203.12602">“VideoMAE: Masked Autoencoders are Data-Efficient
+      Learners for Self-Supervised Video Pre-Training”</a> (NeurIPS 2022). SaViMAE adds the saliency pipeline in
+      <code>SaVi/</code>, the utilities in <code>scripts/</code>, and the saliency-aware data path and CPU changes
+      inside <code>VideoMAE/</code>.</p>
+
+    <div class="note">
+      <p><strong>Implementation note.</strong> The repo contains two versions of step 4.
+        <code>SaVi/saliency_masking_generator.py</code> applies the ratios per group exactly as described above.
+        The class the training run uses, <code>DataAugmentationForSaViMAE</code> in <code>VideoMAE/datasets.py</code>,
+        works differently. It fixes a total budget of 0.95 × tokens and gives 85% of that budget to salient tokens,
+        then tops up from the rest. When salient tokens are scarce, they all end up masked. Panels 4 and 5 below show
+        the difference on the same synthetic frame.</p>
+    </div>
+  </section>
+
+  <section id="setup">
+    <h2>Training setup</h2>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><th>Data</th><td><a href="https://www.crcv.ucf.edu/data/UCF101.php">UCF101</a>, pre-extracted to JPEG frames. The full list in the repo has 13,034 videos; a 1,000-video subset list is also committed</td></tr>
+          <tr><th>Model</th><td><code>pretrain_videomae_base_patch16_224</code> (ViT-B, patch 16, tubelet 2)</td></tr>
+          <tr><th>Clip</th><td>16 frames, sampling rate 4, 224×224 → 8×14×14 = 1,568 tokens</td></tr>
+          <tr><th>Masking</th><td><code>--mask_type savi</code>, salient 0.85, non-salient 0.95</td></tr>
+          <tr><th>Batch / epochs</th><td>2 / 30 (README command)</td></tr>
+          <tr><th>Hardware</th><td>CPU only (<code>--device cpu</code>), submitted as Slurm jobs on Dartmouth HPC (Discovery cluster / Polaris)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="results">
+    <h2>Results</h2>
+    <div class="note">
+      <p><strong>Results pending.</strong> No training logs, loss curves or evaluation numbers are committed to this
+        repository yet. Checkpoints and logs are git-ignored. <code>scripts/plot_savi_loss.py</code> and
+        <code>scripts/eval_savi_recon_loss.py</code> produce them from a local run. This page will show results once
+        they are committed. Until then it reports no metrics.</p>
+    </div>
+    <figure>
+      <img src="assets/masking.svg" alt="Illustrative only: a synthetic frame, its saliency map, the 14 by 14 patch saliency grid, and the masks produced by the two masking implementations.">
+      <figcaption><strong>Illustrative, not a result.</strong> A synthetic 224×224 frame (two bright shapes and a
+        dark ball on a gradient) run through the repo's own saliency and patch code, then masked by both
+        implementations of step 4. The percentages describe this one made-up frame. Regenerate with
+        <code>uv run site/tools/make_masking_figure.py</code>.</figcaption>
+    </figure>
+  </section>
+
+  <section id="license">
+    <h2>Licensing</h2>
+    <div class="note">
+      <p>This repository carries mixed licences. Nothing here relicenses anything.</p>
+      <ul>
+        <li>The root <code>LICENSE</code> is <strong>MIT</strong>. It covers the original SaViMAE code in
+          <code>SaVi/</code>, <code>scripts/</code> and this site.</li>
+        <li><code>VideoMAE/</code> is upstream code under <strong>CC BY-NC 4.0</strong> (see
+          <code>VideoMAE/LICENSE</code> and <code>NOTICE.md</code>), and that includes the SaViMAE modifications made
+          inside it. Training with this pipeline is therefore subject to its non-commercial terms.</li>
+        <li><code>RGBD_Video_SOD</code> is a git submodule pointing at a separate repository under its own licence.</li>
+        <li>UCF101 is not redistributed here. Its own terms apply.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <p>SaViMAE by Sebastian Frazier. Built on VideoMAE (MCG-NJU). Thanks to Prof. SouYoung Jin and the Dartmouth
+      HPC maintainers. Site source in <code>site/</code>, deployed from <code>main</code> by GitHub Actions.</p>
+  </footer>
+</main>
+</body>
+</html>
