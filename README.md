@@ -18,6 +18,33 @@ This project was built for academic experimentation and course work, emphasizing
 
 ---
 
+## 🌐 Project site
+
+**https://sebastianfrazier26.github.io/SaViMAE/** (pending: goes live once GitHub Pages is enabled)
+
+The site source is in `site/` (static HTML/CSS, no build step). `.github/workflows/pages.yml` deploys it on every push to `main` and on manual dispatch. Before deploying, the workflow regenerates the illustrative masking figure from the repo code:
+
+```bash
+uv run site/tools/make_masking_figure.py   # writes site/assets/masking.svg
+```
+
+To preview locally, run `python3 -m http.server -d site 8000` and open http://localhost:8000.
+
+**One-time setup (repo owner):** Settings → Pages → Build and deployment → Source: **GitHub Actions**.
+
+---
+
+## ⚖️ Licensing note
+
+This repository has **mixed licences**, and nothing here relicenses anything:
+
+- The root `LICENSE` (**MIT**) covers the original SaViMAE code: `SaVi/`, `scripts/` and `site/`.
+- `VideoMAE/` is upstream [MCG-NJU/VideoMAE](https://github.com/MCG-NJU/VideoMAE) code under **CC BY-NC 4.0** (see `VideoMAE/LICENSE` and `VideoMAE/NOTICE.md`). That includes the SaViMAE modifications made inside it. Using the full training pipeline is therefore subject to its **non-commercial** terms.
+- `RGBD_Video_SOD` is a git submodule that points at a separate repository with its own licence.
+- UCF101 is not redistributed. Its own terms apply.
+
+---
+
 ## 📦 Repository Structure
 
 ```
@@ -148,7 +175,7 @@ python -m VideoMAE.run_mae_pretraining \
 
 RGBD_Video_SOD authors - Junhao Lin, Lei Zhu, Jiaxing Shen, Huazhu Fu, Qing Zhang, Liansheng Wang @ [https://arxiv.org/abs/2406.12536]
 
-RGBD Video SOD authors - Zhan Tong, Yibing Song, Jue Wang, Limin Wang @ [https://arxiv.org/abs/2203.12602]
+VideoMAE authors - Zhan Tong, Yibing Song, Jue Wang, Limin Wang @ [https://arxiv.org/abs/2203.12602]
 
 UCF101 dataset creators - [https://www.crcv.ucf.edu/data/UCF101.php]
 
