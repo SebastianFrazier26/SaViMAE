@@ -1,36 +1,31 @@
-import os
+"""Write a '<frames_dir> <label>' list for a UCF-101 frames tree.
 
-FRAMES_ROOT = "datasets/UCF-101-frames"
-OUT_LIST = "pretrain_list_ucf101_full.txt"
+Labels are the alphabetical class index, matching the subset list.
+    python scripts/make_ucf101_full_list.py --frames_root datasets/UCF-101-frames --out list.txt
+"""
 
-# Use the same class → label mapping as in the subset:
-# sort class names alphabetically and assign 0..N-1
-classes = sorted(
-    d for d in os.listdir(FRAMES_ROOT)
-    if os.path.isdir(os.path.join(FRAMES_ROOT, d))
-)
-class_to_label = {cls: i for i, cls in enumerate(classes)}
+import argparse
+from pathlib import Path
 
-print("Found classes:")
-for cls, lbl in class_to_label.items():
-    print(f"  {lbl:2d}  {cls}")
 
-lines = []
+def build_list(frames_root: Path) -> list[str]:
+    classes = sorted(d.name for d in frames_root.iterdir() if d.is_dir())
+    lines = []
+    for label, cls in enumerate(classes):
+        for vid in sorted(d for d in (frames_root / cls).iterdir() if d.is_dir()):
+            lines.append(f"{frames_root / cls / vid.name} {label}\n")
+    return lines
 
-for cls in classes:
-    label = class_to_label[cls]
-    cls_dir = os.path.join(FRAMES_ROOT, cls)
-    for vid in sorted(os.listdir(cls_dir)):
-        vid_dir = os.path.join(cls_dir, vid)
-        if not os.path.isdir(vid_dir):
-            continue
-        # line format: "path/to/video_dir label"
-        rel_path = os.path.join(FRAMES_ROOT, cls, vid)
-        lines.append(f"{rel_path} {label}\n")
 
-print(f"\nTotal videos: {len(lines)}")
-with open(OUT_LIST, "w") as f:
-    f.writelines(lines)
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--frames_root", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    args = parser.parse_args()
+    lines = build_list(args.frames_root)
+    args.out.write_text("".join(lines))
+    print(f"Wrote {len(lines)} videos to {args.out}")
 
-print(f"Wrote list to {OUT_LIST}")
 
+if __name__ == "__main__":
+    main()

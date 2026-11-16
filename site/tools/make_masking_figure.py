@@ -24,17 +24,17 @@ REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "site" / "assets" / "masking.svg"
 
 # Import the project's real saliency/patch/mask code so the figure tracks main.
-sys.path.insert(0, str(REPO / "SaVi"))
-from generate_simple_saliency_subset import compute_simple_saliency
-from precompute_saliency_patches import frame_to_patch_mask
-from saliency_masking_generator import SaliencyMaskingGenerator
+sys.path.insert(0, str(REPO))
+from SaVi.generate_simple_saliency_subset import compute_simple_saliency  # noqa: E402
+from SaVi.precompute_saliency_patches import frame_to_patch_mask  # noqa: E402
+from SaVi.saliency_masking_generator import SaliencyMaskingGenerator  # noqa: E402
 
 SIZE = 224
 PATCH = 16
 GRID = SIZE // PATCH
 TUBELETS = 8  # 16 frames / tubelet size 2
 SALIENT_RATIO = 0.85
-NONSALIENT_RATIO = 0.95
+BACKGROUND_RATIO = 0.95
 SEED = 7
 
 
@@ -50,18 +50,19 @@ def synthetic_frame() -> np.ndarray:
     return np.clip(img, 0.0, 1.0).astype(np.float32)
 
 
-def training_path_mask(
+def previous_training_mask(
     flat_saliency: np.ndarray, rng: np.random.Generator
 ) -> np.ndarray:
-    """Mirror of DataAugmentationForSaViMAE.__call__ in VideoMAE/datasets.py.
+    """The masking the training run used BEFORE the 2026-10-22 fix, kept for contrast.
 
-    Re-stated rather than imported because that module pulls in torch/torchvision;
-    keep in sync if the budget logic there changes.
+    Re-stated here because the code it mirrors was removed from VideoMAE/datasets.py.
+    Budget K = 0.95*N, 85% of K assigned to salient tokens (capped at their count),
+    rest topped up from background: salient tokens end up ALL masked when scarce.
     """
     total = flat_saliency.shape[0]
     salient_idx = np.where(flat_saliency == 1)[0]
     nonsalient_idx = np.where(flat_saliency == 0)[0]
-    k = max(1, min(total - 1, int(NONSALIENT_RATIO * total)))
+    k = max(1, min(total - 1, int(BACKGROUND_RATIO * total)))
     k_sal = int(SALIENT_RATIO * k)
     k_nonsal = k - k_sal
     chosen = []
@@ -134,13 +135,12 @@ def main() -> None:
     patches = frame_to_patch_mask(saliency, PATCH, threshold=0.5)
     volume = np.repeat(patches[None], TUBELETS, axis=0)
 
-    np.random.seed(SEED)  # SaliencyMaskingGenerator draws from the global RNG
     gen = SaliencyMaskingGenerator(
-        (TUBELETS, GRID, GRID), SALIENT_RATIO, NONSALIENT_RATIO, volume
+        (TUBELETS, GRID, GRID), SALIENT_RATIO, BACKGROUND_RATIO, volume
     )
-    mask_a = gen().reshape(TUBELETS, GRID, GRID)[0]
+    mask_new = gen(np.random.default_rng(SEED)).reshape(TUBELETS, GRID, GRID)[0]
     sal_flat = (volume >= 0.5).astype(np.int32).reshape(-1)
-    mask_b = training_path_mask(sal_flat, np.random.default_rng(SEED)).reshape(
+    mask_old = previous_training_mask(sal_flat, np.random.default_rng(SEED)).reshape(
         TUBELETS, GRID, GRID
     )[0]
     sal2d = (patches >= 0.5).astype(np.int32)
@@ -162,8 +162,8 @@ def main() -> None:
             frame_img + grid_rects(cell, lambda i, j: mask2d[i, j] == 1, "m") + outline
         )
 
-    a_sal, a_non = group_stats(mask_a, sal2d)
-    b_sal, b_non = group_stats(mask_b, sal2d)
+    new_sal, new_non = group_stats(mask_new, sal2d)
+    old_sal, old_non = group_stats(mask_old, sal2d)
     n_sal = int(sal2d.sum())
 
     parts = [
@@ -200,25 +200,25 @@ def main() -> None:
             xs[0],
             ys[1],
             s,
-            "4 · SaliencyMaskingGenerator",
+            "4 · current: SaliencyMaskingGenerator",
             [
-                f"salient masked {a_sal}",
-                f"non-salient masked {a_non}",
-                "per-group ratios 0.85 / 0.95",
+                f"salient masked {new_sal}",
+                f"non-salient masked {new_non}",
+                "targets 0.85 / 0.95, fixed K = 0.95·N",
             ],
-            masked_view(mask_a),
+            masked_view(mask_new),
         ),
         panel(
             xs[1],
             ys[1],
             s,
-            "5 · training path (datasets.py)",
+            "5 · before the 2026-10-22 fix (superseded)",
             [
-                f"salient masked {b_sal}",
-                f"non-salient masked {b_non}",
-                "budget K = 0.95·N, 85% of K to salient",
+                f"salient masked {old_sal}",
+                f"non-salient masked {old_non}",
+                "old runs used this: budget K to salient first",
             ],
-            masked_view(mask_b),
+            masked_view(mask_old),
         ),
     ]
 
@@ -257,7 +257,7 @@ def main() -> None:
     OUT.write_text(svg, encoding="utf-8")
     print(
         f"wrote {OUT.relative_to(REPO)}  salient patches {n_sal}/196  "
-        f"A: sal {a_sal} non {a_non}  B: sal {b_sal} non {b_non}"
+        f"A: sal {new_sal} non {new_non}  B: sal {old_sal} non {old_non}"
     )
 
 

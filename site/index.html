@@ -31,7 +31,7 @@
       based on a per-frame saliency map, and gives each group its own mask ratio:</p>
     <div class="ratios">
       <div class="ratio"><b>0.85</b><span>mask ratio, salient patches<br><code>--salient_mask_ratio</code></span></div>
-      <div class="ratio"><b>0.95</b><span>mask ratio, non-salient patches<br><code>--nonsalient_mask_ratio</code></span></div>
+      <div class="ratio"><b>0.95</b><span>mask ratio, non-salient patches<br><code>--background_mask_ratio</code></span></div>
     </div>
     <p>Both values are the defaults in <code>VideoMAE/run_mae_pretraining.py</code> and the values used by the scripts
       in <code>scripts/</code>. More of the salient region stays visible to the encoder. The background is masked
@@ -96,12 +96,12 @@
       inside <code>VideoMAE/</code>.</p>
 
     <div class="note">
-      <p><strong>Implementation note.</strong> The repo contains two versions of step 4.
-        <code>SaVi/saliency_masking_generator.py</code> applies the ratios per group exactly as described above.
-        The class the training run uses, <code>DataAugmentationForSaViMAE</code> in <code>VideoMAE/datasets.py</code>,
-        works differently. It fixes a total budget of 0.95 × tokens and gives 85% of that budget to salient tokens,
-        then tops up from the rest. When salient tokens are scarce, they all end up masked. Panels 4 and 5 below show
-        the difference on the same synthetic frame.</p>
+      <p><strong>Fixed on 2026-10-22.</strong> Until then the training path did not apply the ratios above. It fixed
+        a total budget of 0.95 × tokens and gave 85% of that budget to salient tokens, which masked <em>all</em>
+        salient tokens when they were a minority, the opposite of the intent. Training now uses the per-group
+        generator in <code>SaVi/saliency_masking_generator.py</code>. <strong>Earlier runs used the old behaviour,
+        and the experiment has not been rerun, so results are pending.</strong> Panels 4 and 5 below contrast the
+        current and previous behaviour on the same synthetic frame.</p>
     </div>
   </section>
 
@@ -113,7 +113,7 @@
           <tr><th>Data</th><td><a href="https://www.crcv.ucf.edu/data/UCF101.php">UCF101</a>, pre-extracted to JPEG frames. The full list in the repo has 13,034 videos; a 1,000-video subset list is also committed</td></tr>
           <tr><th>Model</th><td><code>pretrain_videomae_base_patch16_224</code> (ViT-B, patch 16, tubelet 2)</td></tr>
           <tr><th>Clip</th><td>16 frames, sampling rate 4, 224×224 → 8×14×14 = 1,568 tokens</td></tr>
-          <tr><th>Masking</th><td><code>--mask_type savi</code>, salient 0.85, non-salient 0.95</td></tr>
+          <tr><th>Masking</th><td><code>--mask_type savi</code>, salient 0.85, background 0.95 (earlier runs: old budget-first behaviour, see note above)</td></tr>
           <tr><th>Batch / epochs</th><td>2 / 30 (README command)</td></tr>
           <tr><th>Hardware</th><td>CPU only (<code>--device cpu</code>), submitted as Slurm jobs on Dartmouth HPC (Discovery cluster / Polaris)</td></tr>
         </tbody>
@@ -130,10 +130,10 @@
         they are committed. Until then it reports no metrics.</p>
     </div>
     <figure>
-      <img src="assets/masking.svg" alt="Illustrative only: a synthetic frame, its saliency map, the 14 by 14 patch saliency grid, and the masks produced by the two masking implementations.">
+      <img src="assets/masking.svg" alt="Illustrative only: a synthetic frame, its saliency map, the 14 by 14 patch saliency grid, and the masks from the current masking and from the previous, superseded behaviour.">
       <figcaption><strong>Illustrative, not a result.</strong> A synthetic 224×224 frame (two bright shapes and a
-        dark ball on a gradient) run through the repo's own saliency and patch code, then masked by both
-        implementations of step 4. The percentages describe this one made-up frame. Regenerate with
+        dark ball on a gradient) run through the repo's own saliency and patch code, then masked by the current
+        step 4 and, for contrast, the superseded behaviour. The percentages describe this one made-up frame. Regenerate with
         <code>uv run site/tools/make_masking_figure.py</code>.</figcaption>
     </figure>
   </section>

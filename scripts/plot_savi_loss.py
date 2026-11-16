@@ -1,33 +1,46 @@
+"""Plot the training loss from a VideoMAE train_log.txt.
+
+python scripts/plot_savi_loss.py --log checkpoints/run/train_log.txt --out loss_curve.png
+"""
+
+import argparse
 import re
+
 import matplotlib.pyplot as plt
 
-LOG_PATH = "checkpoints/ucf_savi_subset/train_log.txt"
+LOSS_RE = re.compile(r"loss:\s*([0-9.]+)")
 
-step_ids = []
-losses = []
 
-step = 0
+def parse_losses(log_path: str) -> list[float]:
+    losses = []
+    with open(log_path) as f:
+        for line in f:
+            if "Epoch:" in line and "loss:" in line:
+                m = LOSS_RE.search(line)
+                if m:
+                    losses.append(float(m.group(1)))
+    return losses
 
-with open(LOG_PATH, "r") as f:
-    for line in f:
-        if "Epoch:" in line and "loss:" in line:
-            # Example fragment: "loss: 1.3768 (1.3768)"
-            m = re.search(r"loss:\s*([0-9.]+)", line)
-            if m:
-                loss_val = float(m.group(1))
-                losses.append(loss_val)
-                step_ids.append(step)
-                step += 1
 
-print(f"Parsed {len(losses)} loss entries")
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--log", required=True)
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--title", default="SaViMAE pretraining loss")
+    args = parser.parse_args()
 
-plt.figure()
-plt.plot(step_ids, losses, marker="", linestyle="-")
-plt.xlabel("Iteration")
-plt.ylabel("Training loss")
-plt.title("SaViMAE pretraining loss (UCF-101 subset)")
-plt.grid(True)
-plt.tight_layout()
-plt.savefig("checkpoints/ucf_savi_subset/loss_curve.png")
-print("Saved checkpoints/ucf_savi_subset/loss_curve.png")
+    losses = parse_losses(args.log)
+    print(f"Parsed {len(losses)} loss entries")
+    plt.figure()
+    plt.plot(range(len(losses)), losses, linestyle="-")
+    plt.xlabel("Iteration")
+    plt.ylabel("Training loss")
+    plt.title(args.title)
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(args.out)
+    print(f"Saved {args.out}")
 
+
+if __name__ == "__main__":
+    main()

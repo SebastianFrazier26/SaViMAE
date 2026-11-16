@@ -1,7 +1,9 @@
-import os
 import argparse
-from PIL import Image
+import os
+
 import numpy as np
+from PIL import Image
+
 
 def compute_simple_saliency(gray_arr: np.ndarray) -> np.ndarray:
     """
@@ -14,6 +16,7 @@ def compute_simple_saliency(gray_arr: np.ndarray) -> np.ndarray:
     if max_val > 0:
         sal = sal / max_val
     return sal
+
 
 def process_frames(frames_root: str, out_root: str, input_size: int = 224):
     """
@@ -57,7 +60,7 @@ def process_frames(frames_root: str, out_root: str, input_size: int = 224):
                         img = img.resize((input_size, input_size), Image.BILINEAR)
 
                     arr = np.array(img).astype(np.float32) / 255.0  # [0,1]
-                    sal = compute_simple_saliency(arr)              # [0,1]
+                    sal = compute_simple_saliency(arr)  # [0,1]
 
                     sal_img = (sal * 255.0).astype(np.uint8)
                     out_img = Image.fromarray(sal_img, mode="L")
@@ -71,6 +74,7 @@ def process_frames(frames_root: str, out_root: str, input_size: int = 224):
                     print(f"Error processing {in_path}: {e}")
 
     print(f"Done! Total saliency maps written: {num_images}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -95,4 +99,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     process_frames(args.frames_root, args.out_root, args.input_size)
-

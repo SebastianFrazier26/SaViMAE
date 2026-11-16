@@ -1,0 +1,35 @@
+[project]
+name = "savimae"
+version = "0.1.0"
+description = "Saliency-aware masking for VideoMAE pretraining"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "pillow>=10", "torch>=2.2"]
+
+[project.optional-dependencies]
+# Needed to run VideoMAE/ training and scripts/; not needed for tests or the site tool.
+train = ["torchvision", "timm", "einops", "decord", "matplotlib"]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+# Linux wheels from PyPI bundle CUDA (GBs); CI and CPU boxes want the CPU build.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+# Lint only the owner's code; VideoMAE/ is upstream and RGBD_Video_SOD is a submodule.
+[tool.ruff]
+extend-exclude = ["VideoMAE", "RGBD_Video_SOD"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]  # the formatter owns line length
